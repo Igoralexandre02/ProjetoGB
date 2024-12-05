@@ -1,78 +1,76 @@
 import re
+from PyPDF2 import PdfReader, PdfWriter
+from reportlab.pdfgen import canvas
+from io import BytesIO
 
-def extrair_nomes_bilhetes(arquivo):
-    """Extrai o codigo do bilhete do arquivo bilhetes.txt com o padrão específico."""
-    
-    codigosBilhete = set()
-    
-    with open(arquivo, 'r', encoding='utf-8') as f:
-        texto = f.read()
-        
-        # Captura todos os codigos de uma vez
-        match = re.findall(r'Passageiro:\s*DOC:\s*\d*\s*-\s*(.*)', texto)
-        
-        # Adiciona os codigos um conjuto    
-        codigosBilhete.update(n.strip() for n in match)
-        
-        # Conta a quantidade de codigos encontrados
-        quantidadeCodigos = len(match)
-        codigosBilhete.add(f"1-Total: {str(quantidadeCodigos)}")
-        
-    return codigosBilhete
-
-def extrair_nomes_fatura(arquivo):
-    """Extrai os codigos do arquivo fatura.txt considerando múltiplos padrões."""
+def extrair_nomes_fatura(fatura_arquivo):
+    """Extrai os códigos do arquivo fatura.txt considerando múltiplos padrões."""
     codigosFatura = set()
-    with open(arquivo, 'r', encoding='utf-8') as f:
+    with open(fatura_arquivo, 'r', encoding='utf-8') as f:
         texto = f.read()
-        
-        # Procurar nomes após 'Classe do Voo:'
-        #padrao_classe_voo = r'Classe do Voo:\s*(?:\n|\s)*([A-Za-zÀ-ÖØ-öø-ÿ ]+)'
         
         codigoFatura = re.findall(r"(?<=\b2024\s)\b(?=[A-Z0-9]*[0-9])[A-Z0-9]{5}\b", texto)
         
-        # Procurar nomes após 'Observação' e excluir 'EUCATUR' e padrões como 'ND00029561'
-        #padrao_observacao = r'Observação:\s*(?:\n|\s)*([A-Za-zÀ-ÖØ-öø-ÿ ]+)(?!\s*EUCATUR|ND\d+|\b[A-Z]{2,}\d+)'
-        #nomes_observacao = re.findall(padrao_observacao, texto)
-        
-        # Adicionar nomes ao conjunto, removendo espaços desnecessários
+        # Adicionar códigos ao conjunto, removendo espaços desnecessários
         codigosFatura.update(n.strip() for n in codigoFatura if n.strip())
-        quantidadeFatura = len(codigoFatura)
-        codigosFatura.add(f"Total: {str(quantidadeFatura)}")
         
     return codigosFatura
 
-def comparar_nomes(bilhetes_arquivo, fatura_arquivo):
-    """Compara os nomes dos passageiros nos arquivos de bilhetes e faturas."""
-    nomes_bilhetes = extrair_nomes_bilhetes(bilhetes_arquivo)
-    nomes_fatura = extrair_nomes_fatura(fatura_arquivo)
-
-    # Identificar nomes em bilhetes que não estão nas faturas
-    nomes_sem_fatura = nomes_bilhetes - nomes_fatura
-    nomes_sem_bilhetes = nomes_fatura - nomes_bilhetes 
+def marcar_codigos_no_pdf(pdf_entrada, pdf_saida, codigos, cor=(0.8, 0.9, 1)):
+    """
+    Marca os códigos encontrados no PDF com uma sobreposição azul-claro.
     
-    return nomes_sem_fatura, nomes_sem_bilhetes
+    Args:
+        pdf_entrada (str): Caminho do PDF original.
+        pdf_saida (str): Caminho do PDF de saída.
+        codigos (set): Conjunto de códigos a serem marcados.
+        cor (tuple): Cor RGB para o destaque (padrão: azul-claro).
+    """
+    reader = PdfReader(pdf_entrada)
+    writer = PdfWriter()
 
-def salvar_nomes_ausentes(nomes_fatura, nomes_bilhete, arquivo_fatura, arquivo_bilhete):
-    """Salva os nomes ausentes em um arquivo de saída."""
-    with open(arquivo_fatura, 'w', encoding='utf-8') as f:
-        f.write(f"Faturas sem bilhetes:\n")
-        for nome in sorted(nomes_fatura):
-            f.write(f"{nome}\n")
-            
-    with open(arquivo_bilhete, 'w', encoding='utf-8') as b:
-        b.write(f"Bilhetes sem faturas:\n\n")    
-        for nome in sorted(nomes_bilhete):
-            b.write(f"{nome}\n")
-            
-# Defina os caminhos dos arquivos
-bilhetes_arquivo = r'C:\Users\igora\OneDrive\Documents\Bilhetes\bilhetes.txt'
+    for i, page in enumerate(reader.pages):
+        # Extrair texto da página
+        texto = page.extract_text()
+        
+        # Criar um buffer para sobreposição
+        packet = BytesIO()
+        can = canvas.Canvas(packet, pagesize=page.mediabox)
+        
+        # Verificar se algum código está presente e marcá-lo
+        encontrou = False
+        for codigo in codigos:
+            if codigo in texto:
+                encontrou = True
+                # Localizar a posição do código (ajustar para PDFs reais)
+                x, y = 100, 500  # Coordenadas fictícias; ajustar conforme o caso real
+                largura, altura = 200, 20
+                
+                can.setFillColorRGB(*cor)
+                can.rect(x, y, largura, altura, fill=True)
+        
+        can.save()
+        packet.seek(0)
+
+        # Adicionar a sobreposição somente se houve algum código
+        if encontrou:
+            overlay_reader = PdfReader(packet)
+            overlay_page = overlay_reader.pages[0]  # Primeira página do buffer
+            page.merge_page(overlay_page)
+        
+        writer.add_page(page)
+    
+    # Salvar o PDF com os destaques
+    with open(pdf_saida, "wb") as f:
+        writer.write(f)
+
+# Caminhos dos arquivos
+bilhetes_pdf = r'C:\Users\igora\OneDrive\Documents\Bilhetes\bilhetes_juntos.pdf'
 fatura_arquivo = r'C:\Users\igora\OneDrive\Documents\Bilhetes\fatura.txt'
-arquivo_fatura = r'C:\Users\igora\OneDrive\Documents\Bilhetes\nomes_fatura.txt'
-arquivo_bilhete = r'C:\Users\igora\OneDrive\Documents\Bilhetes\nomes_bilhetes.txt'
+pdf_saida = r'C:\Users\igora\OneDrive\Documents\Bilhetes\bilhetes_marcados.pdf'
 
-# Comparar e salvar nomes ausentes
-nomes_sem_fatura, nomes_sem_bilhetes = comparar_nomes(bilhetes_arquivo, fatura_arquivo)
-salvar_nomes_ausentes(nomes_sem_fatura, nomes_sem_bilhetes, arquivo_fatura, arquivo_bilhete)
+# Extrair códigos da fatura
+codigosFatura = extrair_nomes_fatura(fatura_arquivo)
 
-print(f"Nomes ausentes foram salvos nos arquivos: nomes_fatura e nomes_bilhete")
+# Marcar os códigos encontrados no PDF
+marcar_codigos_no_pdf(bilhetes_pdf, pdf_saida, codigosFatura)

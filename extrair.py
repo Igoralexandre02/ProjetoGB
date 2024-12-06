@@ -1,7 +1,6 @@
 import re
-from PyPDF2 import PdfReader, PdfWriter
-from reportlab.pdfgen import canvas
-from io import BytesIO
+import fitz  # PyMuPDF
+from concurrent.futures import ThreadPoolExecutor
 
 def extrair_nomes_fatura(fatura_arquivo):
     """Extrai os códigos do arquivo fatura.txt considerando múltiplos padrões."""
@@ -16,53 +15,59 @@ def extrair_nomes_fatura(fatura_arquivo):
         
     return codigosFatura
 
-def marcar_codigos_no_pdf(pdf_entrada, pdf_saida, codigos, cor=(0.8, 0.9, 1)):
+def processar_pagina(args):
+    page_num, page, codigos, cor = args
+    texto = page.get_text("text").lower()
+    encontrados = set()
+    for codigo in codigos:
+        if codigo in texto:
+            areas = page.search_for(codigo)
+            for area in areas:
+                # Criar a anotação de destaque (highlight)
+                annot = page.add_highlight_annot(area)
+                if annot:
+                    # Definir cor para o highlight
+                    annot.set_colors(stroke=cor, fill=None)  # Cor de borda (stroke)
+                    annot.update()  # Atualizar a anotação
+
+                # Adicionar texto com o código na página
+                texto_posicao = fitz.Rect(area.x0, area.y0 - 10, area.x1, area.y0)
+                page.insert_textbox(texto_posicao, codigo, fontsize=8, color=cor)
+                
+            encontrados.add(codigo)
+    return encontrados
+
+def marcar_codigos_no_pdf_paralelo(pdf_entrada, pdf_saida, codigos, cor=(1, 0, 0)):
     """
-    Marca os códigos encontrados no PDF com uma sobreposição azul-claro.
-    
+    Marca os códigos encontrados no PDF e escreve os códigos na página.
+
     Args:
         pdf_entrada (str): Caminho do PDF original.
         pdf_saida (str): Caminho do PDF de saída.
         codigos (set): Conjunto de códigos a serem marcados.
-        cor (tuple): Cor RGB para o destaque (padrão: azul-claro).
+        cor (tuple): Cor RGB normalizada para o destaque (valores entre 0 e 1).
     """
-    reader = PdfReader(pdf_entrada)
-    writer = PdfWriter()
+    doc = fitz.open(pdf_entrada)
+    codigos_restantes = {codigo.strip().lower() for codigo in codigos}
 
-    for i, page in enumerate(reader.pages):
-        # Extrair texto da página
-        texto = page.extract_text()
-        
-        # Criar um buffer para sobreposição
-        packet = BytesIO()
-        can = canvas.Canvas(packet, pagesize=page.mediabox)
-        
-        # Verificar se algum código está presente e marcá-lo
-        encontrou = False
-        for codigo in codigos:
-            if codigo in texto:
-                encontrou = True
-                # Localizar a posição do código (ajustar para PDFs reais)
-                x, y = 100, 500  # Coordenadas fictícias; ajustar conforme o caso real
-                largura, altura = 200, 20
-                
-                can.setFillColorRGB(*cor)
-                can.rect(x, y, largura, altura, fill=True)
-        
-        can.save()
-        packet.seek(0)
+    # Preparar argumentos para processamento paralelo
+    args_list = [(i, page, codigos_restantes, cor) for i, page in enumerate(doc)]
 
-        # Adicionar a sobreposição somente se houve algum código
-        if encontrou:
-            overlay_reader = PdfReader(packet)
-            overlay_page = overlay_reader.pages[0]  # Primeira página do buffer
-            page.merge_page(overlay_page)
-        
-        writer.add_page(page)
-    
-    # Salvar o PDF com os destaques
-    with open(pdf_saida, "wb") as f:
-        writer.write(f)
+    # Processar páginas em paralelo
+    with ThreadPoolExecutor() as executor:
+        resultados = executor.map(processar_pagina, args_list)
+
+    # Atualizar códigos restantes com base nos resultados
+    for encontrados in resultados:
+        codigos_restantes -= encontrados
+
+        # Encerrar se todos os códigos foram encontrados
+        if not codigos_restantes:
+            break
+
+    # Salvar o PDF com destaques
+    doc.save(pdf_saida)
+    doc.close()
 
 # Caminhos dos arquivos
 bilhetes_pdf = r'C:\Users\igora\OneDrive\Documents\Bilhetes\bilhetes_juntos.pdf'
@@ -73,4 +78,4 @@ pdf_saida = r'C:\Users\igora\OneDrive\Documents\Bilhetes\bilhetes_marcados.pdf'
 codigosFatura = extrair_nomes_fatura(fatura_arquivo)
 
 # Marcar os códigos encontrados no PDF
-marcar_codigos_no_pdf(bilhetes_pdf, pdf_saida, codigosFatura)
+marcar_codigos_no_pdf_paralelo(bilhetes_pdf, pdf_saida, codigosFatura)

@@ -2,7 +2,7 @@ import re
 import fitz  # PyMuPDF
 from concurrent.futures import ThreadPoolExecutor
 
-def extrair_nomes_fatura(fatura_arquivo):
+def extrair_codigos_fatura(fatura_arquivo):
     """Extrai os códigos do arquivo fatura.txt considerando múltiplos padrões."""
     codigosFatura = set()
     with open(fatura_arquivo, 'r', encoding='utf-8') as f:
@@ -75,7 +75,7 @@ fatura_arquivo = r'C:\Users\igora\OneDrive\Documents\Bilhetes\fatura.txt'
 pdf_saida = r'C:\Users\igora\OneDrive\Documents\Bilhetes\bilhetes_marcados.pdf'
 
 # Extrair códigos da fatura
-codigosFatura = extrair_nomes_fatura(fatura_arquivo)
+codigosFatura = extrair_codigos_fatura(fatura_arquivo)
 
 # Marcar os códigos encontrados no PDF
 marcar_codigos_no_pdf_paralelo(bilhetes_pdf, pdf_saida, codigosFatura)
